@@ -111,7 +111,10 @@ head(w2)
 
 ### so actionable
 ```{r}
-
+ggplot(df)+
+  geom_jitter(aes(Home...Away.FPI, Interest),alpha = 0.2)+
+  xlab('Time')+
+  ylab('Interest')
 ```
 
 Row {data-height=1000, .tabset}

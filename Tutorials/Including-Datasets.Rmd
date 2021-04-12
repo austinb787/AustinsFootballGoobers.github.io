@@ -1,0 +1,43 @@
+---
+title: 'Datasets'
+output: 
+  html_document:
+    vertical_layout: scroll
+    code_folding: hide
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+```
+## DT::datatable {.tabset}
+### Advanced DT::datatable
+
+```{r table, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(DT)
+here::dr_here()
+NFL_Picks_2020_DF <- read.csv(here::here('NFL_Picks_2020_DF.csv'))
+niceTable <- NFL_Picks_2020_DF %>% 
+  select(Picker, Game.Pick, Points,
+         Week, Away.Team, Away.Team.Conference, Away.Team.Odds, Away.Team.Score, 
+         Home.Team, Home.Team.Conference, Home.Team.Odds, Home.Team.Score)
+
+
+datatable(niceTable, filter = 'top', extensions = 'Buttons',  options = list( columnDefs = list(list(width = '70px')),
+                                                                         searchHighlight = TRUE,pageLength = 20  , dom = 'Bfrtip',
+                                                                         buttons = 
+                                                                           list( list(
+                                                                             extend = 'collection',
+                                                                             buttons = list(list(extend='csv',filename='NFL_Picks_2020_DF.csv'),
+                                                                                            list(extend='excel',
+                                                                                                 filename = 'NFL_Picks_2020.xlsx') ),text="Download"
+                                                                             
+                                                                             
+                                                                           ))))
+
+```
+
+
+### Future things
+
+I'll put future things in this tab. 

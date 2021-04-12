@@ -1,0 +1,166 @@
+---
+title: 'Austins Football Goobers'
+output: 
+  flexdashboard::flex_dashboard:
+    vertical_layout: scroll
+    orientation: rows
+    css: dashboard_source_folder/css/basic_css.css
+    theme: bootstrap
+    
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE) # always echo=FALSE for dashboards. No need to show off. you can include source code if you want
+# bc you set echo to false, you don't actually need include=FALSE, message=FALSE, or warning=FALSE in the 
+# chunk "preamble" (can I call it that? if it's called something else can I still call it that?) 
+library(flexdashboard) # dashboards!
+library(highcharter)   # for interactive plots
+library(DT)            # for search/filter/downloadable tables
+library(tidyverse)     # doi
+library(ggthemes)
+options(scipen=999)    # keep scientific notation turned off
+source('dashboard_source_folder/R/file_export_for_dashboards.R')
+
+here::dr_here()
+df <- read.csv(here::here('NFL_Picks_2020_DF.csv'))
+df$Date <- as.Date(df$Date, "1899-12-30")
+
+theme_set(theme_void())
+
+library(googlesheets4)
+week1long <- '1DhEmzR2Jkfor78hOwGrnMHB2WgCFmWtxsGiLuHLP9eI'
+week2long <- '1VD1M-Rhaf_N8zOD8YkP1_b5khmSSUu9NjaEykPsR-3U'
+w1 <- read_sheet(week1long)
+w2 <- read_sheet(week2long)
+```
+
+<div class="footer">
+  <p> Austins Football Goobers | Austin Berg | github.com/austinb787/Austins-Football-Goobers </p>
+</div>
+
+```{r export}
+
+
+```
+
+1. Dashboard
+=====================================
+
+Row {data-height=175}
+-------------------------------------
+
+### Competition Leader
+```{r}
+
+valueBox('Austin'
+         )
+```
+
+### Season Progress
+```{r}
+
+gauge(9 
+      , min = 0 , max = 18
+      # , gaugeSectors( success = c(9, 10), warning = c(7, 9), danger = c(0, 7))
+      )
+
+```
+
+
+### Cellar Dweller
+```{r}
+
+valueBox('Sophie'
+         )
+
+```
+
+Row {data-height=300}
+-------------------------------------
+### Week 1
+
+```{r}
+library(printr)
+head(w1)
+
+```
+
+### more stuuuffffff
+
+```{r}
+
+ggplot(df)+
+  geom_jitter(aes(Home...Away.Odds, Interest),alpha = 0.2)+
+  xlab('Time')+
+  ylab('Interest')
+
+```
+
+Row {data-height=300}
+-------------------------------------
+
+### Week 2
+
+
+```{r}
+library(printr)
+head(w2)
+```
+
+
+### so actionable
+```{r}
+
+```
+
+Row {data-height=1000, .tabset}
+-------------------------------------
+### omg
+
+```{r}
+
+          
+
+```
+
+### it's taaabbbed
+
+```{r}
+
+          
+          
+
+```
+
+
+2. Printing {data-orientation="columns"}
+=====================================
+
+Column {data-height=1000}
+-------------------------------------
+
+```{r,dpi=300}
+knitr::include_url('Tutorials/Table-Print-Comparison.html', height="1000px")
+```
+ 
+
+3. Datasets {data-orientation="columns"}
+=====================================
+
+Column {data-height=1000}
+-------------------------------------
+
+```{r,dpi=300}
+knitr::include_url('Tutorials/Including-Datasets.html', height="1000px")
+```
+
+4. Interactive Viz {data-orientation="columns"}
+=====================================
+
+Column {data-height=1000}
+-------------------------------------
+
+```{r,dpi=300}
+knitr::include_url('Tutorials/Highcharter-tutorial.html', height="1000px")
+```

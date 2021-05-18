@@ -1,0 +1,730 @@
+---
+title: "NFL Pickers 2020"
+author: "Austin Berg"
+date: "4/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggthemes)
+library(lubridate)
+library(forcats)
+
+here::dr_here()
+tib <- as_tibble(read.csv(here::here('NFL_Picks_2020_DF.csv')))
+tib$Date <- as.Date(tib$Date, "1899-12-30")
+
+theme_set(theme_minimal())
+```
+
+```{r theme}
+classic_theme <- theme_bw(base_family = "Helvetica") +
+  theme(
+    axis.title.x = element_text(
+      face = "bold",
+      colour = "black",
+      size = 16
+    ),
+    axis.text.x = element_text(
+      face = "bold",
+      colour = "black",
+      size = 12
+    ),
+    axis.title.y = element_text(
+      face = "bold",
+      colour = "black",
+      size = 16
+    ),
+    axis.text.y = element_text(
+      face = "bold",
+      colour = "black",
+      size = 12
+    ),
+    plot.title = element_text(
+      face = "bold",
+      colour = "black",
+      size = 16,
+      hjust = 0.5
+    ),
+    panel.border = element_rect(
+      linetype = "solid",
+      fill = NA,
+      size = 1.5
+    ),
+    panel.grid.major = element_line(
+      colour = "black",
+      linetype = "solid",
+      size = 0.1
+    ),
+    panel.grid.minor = element_line(
+      colour = "black",
+      linetype = "dashed",
+      size = 0.1
+    ),
+    panel.background = element_rect(fill = "white"),
+    panel.ontop = FALSE
+  )
+```
+
+```{r berg_colors}
+# https://www.r-bloggers.com/2018/02/creating-corporate-colour-palettes-for-ggplot2/
+
+berg_colors <- c(
+  `red`        = "#d11141",
+  `green`      = "#00b159",
+  `blue`       = "#00aedb",
+  `orange`     = "#f37735",
+  `yellow`     = "#ffc425",
+  `light grey` = "#cccccc",
+  `dark grey`  = "#8c8c8c",
+  `turquoise` = "turquoise", 
+  `orangered` = "orangered", 
+  `navy` = "navy")
+
+berg_cols <- function(...) {
+  cols <- c(...)
+  
+  if (is.null(cols))
+    return (berg_colors)
+  
+  berg_colors[cols]
+}
+
+berg_palettes <- list(
+  `main`  = berg_cols("blue", "green", "yellow"),
+  
+  `cool`  = berg_cols("blue", "green"),
+  
+  `hot`   = berg_cols("yellow", "orange", "red"),
+  
+  `mixed` = berg_cols("blue", "green", "yellow", "orange", "red"),
+  
+  `grey`  = berg_cols("light grey", "dark grey"),
+  
+  `stin` = berg_cols("turquoise","navy", "orangered")
+)
+
+berg_pal <- function(palette = "main", reverse = FALSE, ...) {
+  pal <- berg_palettes[[palette]]
+  
+  if (reverse) pal <- rev(pal)
+  
+  colorRampPalette(pal, ...)
+}
+
+scale_color_berg <- function(palette = "main", discrete = TRUE, reverse = FALSE, ...) {
+  pal <- berg_pal(palette = palette, reverse = reverse)
+  
+  if (discrete) {
+    discrete_scale("colour", paste0("berg_", palette), palette = pal, ...)
+  } else {
+    scale_color_gradientn(colours = pal(256), ...)
+  }
+}
+
+scale_fill_berg <- function(palette = "main", discrete = TRUE, reverse = FALSE, ...) {
+  pal <- berg_pal(palette = palette, reverse = reverse)
+  
+  if (discrete) {
+    discrete_scale("fill", paste0("berg_", palette), palette = pal, ...)
+  } else {
+    scale_fill_gradientn(colours = pal(256), ...)
+  }
+}
+```
+
+```{r gamescrap}
+library(ggrepel)
+library(ggimage)
+library(nflfastR)
+library(teamcolors)
+library(nflscrapR)
+
+```
+
+```{r load gamescrap 2019}
+pbp20 <- readRDS(url('https://raw.githubusercontent.com/guga31bb/nflfastR-data/master/data/play_by_play_2020.rds'))
+
+team_info <- nflfastR::teams_colors_logos
+
+game_ids <- nflfastR::fast_scraper_schedules(2020)
+```
+
+```{r box scores}
+box_scores <- pbp20 %>% 
+  filter(quarter_seconds_remaining == 0) %>% 
+  select(game_id, week, qtr, home_team,away_team,season_type, total_away_score, total_home_score)
+```
+
+```{r pickers}
+pickers <- tib %>% 
+  select(Week, Date, Day, Time,
+         Away.Team, Away.Team.Conference, Away.Team.FPI, Away.Team.Odds, Away.Team.Score, 
+         Home.Team, Home.Team.Conference, Home.Team.FPI, Home.Team.Odds, Home.Team.Score,
+         Picker, Game.Pick) %>% 
+  rename(week = Week, 
+         date = Date, 
+         day = Day, 
+         time = Time,
+         a_team = Away.Team, 
+         a_conf = Away.Team.Conference, 
+         a_fpi = Away.Team.FPI, 
+         a_odds = Away.Team.Odds, 
+         a_score = Away.Team.Score, 
+         h_team = Home.Team, 
+         h_conf = Home.Team.Conference, 
+         h_fpi = Home.Team.FPI, 
+         h_odds = Home.Team.Odds, 
+         h_score = Home.Team.Score, 
+         picker = Picker, 
+         team_pick = Game.Pick)
+```
+
+```{r cleaning pickers}
+# Correcting a data entry mistake I noticed
+
+# Fixing the time vector
+pickers <- pickers %>% 
+  mutate(time = hms::as_hms(time*24*60*60)) %>% 
+  replace_na(list(date = ymd(20201122))) %>% 
+  mutate(date = ymd_hms(paste(date, time, sep = " "))) %>% 
+  select(-(day:time))
+
+```
+
+```{r payout}
+odds_function <- function(bet, odds, correct) {
+  if (odds > 100) {
+    return(-1+correct+correct*bet*odds/100)
+  } 
+  else if (odds < -100) {
+    return(-1+correct+correct*bet/(-odds/100))
+  }
+  else if (is.na(odds)) {
+    return(NA)
+  }
+  else {
+    return(NA)
+  }
+}
+
+odds_function(10, 120, 1)
+odds_function(10, 120, 0)
+odds_function(10, -120, 1)
+odds_function(10, -120, 0)
+
+odds_function(1, 135, 1)
+
+units_function <- function(bet, odds, correct) {
+  if (odds > 100) {
+    return(correct+correct*bet*odds/100)
+  } 
+  else if (odds < -100) {
+    return(correct+correct*bet/(-odds/100))
+  }
+  else if (is.na(odds)) {
+    return(NA)
+  }
+  else {
+    return(NA)
+  }
+}
+```
+
+```{r adding columns}
+pickers <- pickers %>% 
+  mutate(pick_conf = case_when(team_pick==h_team ~ h_conf,
+                               team_pick==a_team ~ a_conf),
+         winner = case_when(h_score>a_score ~ h_team,
+                            h_score<a_score ~ a_team,
+                            h_score==a_score ~ 'tie'),
+         loser = case_when(h_score>a_score ~ a_team,
+                           h_score<a_score ~ h_team,
+                           h_score==a_score ~ 'tie'),
+         margin = abs(h_score-a_score))
+
+bet <- 1
+
+pickers <- pickers %>% 
+  mutate(correct = case_when(team_pick == winner ~ 1,
+                             team_pick == loser ~ 0),
+         pick_odds = case_when(team_pick==h_team ~ h_odds,
+                               team_pick==a_team ~ a_odds))
+
+pickers <- pickers %>% 
+  rowwise() %>% 
+  mutate(points = ifelse(is.na(correct)==FALSE, odds_function(bet, pick_odds, correct), NA),
+         units = ifelse(is.na(correct)==FALSE, units_function(bet, pick_odds, correct), NA))
+
+pickers %>% 
+  distinct(team_pick) %>% 
+  unique()
+```
+
+```{r team data}
+team_data <- pickers %>% 
+  select(team_pick, winner) %>% 
+  count(winner) %>% 
+  mutate(wins = n/6) %>% 
+  select(-n) %>% 
+  rename(team = winner)
+
+pick_data <- pickers %>% 
+  select(picker, team_pick) %>% 
+  count(team_pick) %>% 
+  mutate(avg_picks = n/6) %>% 
+  select(-n) %>% 
+  rename(team = team_pick)
+
+team_data <- team_data %>% 
+  inner_join(pick_data) %>% 
+  mutate(diff = wins-avg_picks,
+         team = as_factor(team)) %>% 
+  arrange(diff) %>% 
+  mutate(positive = ifelse(diff>0,"pos","neg"))
+```
+
+```{r pick data}
+pick_data <- pickers %>% 
+  select(picker, team_pick) %>% 
+  count(picker, team_pick) %>% 
+  rename(team = team_pick,
+         times_picked = n) %>% 
+  inner_join(team_data) %>% 
+  mutate(diff = wins-times_picked,
+         team = as_factor(team)) %>% 
+  arrange(diff) %>% 
+  mutate(positive = ifelse(diff>0,"pos","neg"))
+```
+
+```{r hteam and ateam}
+hteam <- team_info %>% 
+  rename("h_team" = "team_name") %>% 
+  select(h_team, team_abbr, team_color)
+
+pickers <- left_join(x = pickers, 
+                     y = hteam,
+                     by = "h_team")
+
+pickers <- pickers %>% 
+  rename(h_team_abbr = team_abbr,
+         h_team_color = team_color)
+
+ateam <- team_info %>% 
+  rename("a_team" = "team_name") %>% 
+  select(a_team, team_abbr, team_color)
+
+pickers <- left_join(x = pickers, 
+                     y = ateam,
+                     by = "a_team")
+
+pickers <- pickers %>% 
+  rename(a_team_abbr = team_abbr,
+         a_team_color = team_color)  
+
+pickers$week <- str_pad(pickers$week, 2, pad = "0")
+
+pickers <- pickers %>% 
+  mutate(game_id = str_c(year(date),week,a_team_abbr,h_team_abbr, sep="_"))
+```
+
+```{r third quarter}
+thirdqtr <- box_scores %>% 
+  select(-week,-season_type) %>% 
+  filter(qtr==3) %>% 
+  left_join(pickers,
+            by = "game_id") %>% 
+  select(game_id, date, a_team, h_team, total_away_score, total_home_score, a_odds, h_odds, picker, team_pick) %>% 
+  rename(h_score=total_home_score,
+         a_score=total_away_score) %>% 
+  mutate(winner = case_when(h_score>a_score ~ h_team,
+                            h_score<a_score ~ a_team,
+                            h_score==a_score ~ 'tie'),
+         loser = case_when(h_score>a_score ~ a_team,
+                           h_score<a_score ~ h_team,
+                           h_score==a_score ~ 'tie'),
+         margin = abs(h_score-a_score)) %>% 
+  mutate(correct = case_when(team_pick == winner ~ 1,
+                             team_pick == loser ~ 0),
+         pick_odds = case_when(team_pick==h_team ~ h_odds,
+                               team_pick==a_team ~ a_odds)) %>% 
+  rowwise() %>% 
+  mutate(points = ifelse(is.na(correct)==FALSE, odds_function(bet, pick_odds, correct), NA),
+         units = ifelse(is.na(correct)==FALSE, units_function(bet, pick_odds, correct), NA))
+```
+
+```{r second quarter}
+secondqtr <- box_scores %>% 
+  select(-week,-season_type) %>% 
+  filter(qtr==2) %>% 
+  left_join(pickers,
+            by = "game_id") %>% 
+  select(game_id, date, a_team, h_team, total_away_score, total_home_score, a_odds, h_odds, picker, team_pick) %>% 
+  rename(h_score=total_home_score,
+         a_score=total_away_score) %>% 
+  mutate(winner = case_when(h_score>a_score ~ h_team,
+                            h_score<a_score ~ a_team,
+                            h_score==a_score ~ 'tie'),
+         loser = case_when(h_score>a_score ~ a_team,
+                           h_score<a_score ~ h_team,
+                           h_score==a_score ~ 'tie'),
+         margin = abs(h_score-a_score)) %>% 
+  mutate(correct = case_when(team_pick == winner ~ 1,
+                             team_pick == loser ~ 0),
+         pick_odds = case_when(team_pick==h_team ~ h_odds,
+                               team_pick==a_team ~ a_odds)) %>% 
+  rowwise() %>% 
+  mutate(points = ifelse(is.na(correct)==FALSE, odds_function(bet, pick_odds, correct), NA),
+         units = ifelse(is.na(correct)==FALSE, units_function(bet, pick_odds, correct), NA))
+```
+
+```{r points over time plot}
+# pickers %>% 
+#   drop_na() %>% 
+#   group_by(picker) %>% 
+#   mutate(total_points = cumsum(points)) %>% 
+#   ggplot()+
+#   geom_line(aes(x=date,y=total_points,color=picker))+
+#   scale_color_berg(palette="stin")+
+#   theme_fivethirtyeight()
+
+# pickers %>% 
+#   drop_na() %>% 
+#   group_by(picker) %>% 
+#   mutate(total_correct = cumsum(correct)) %>% 
+#   ggplot()+
+#   geom_line(aes(x=date,y=total_correct,color=picker))+
+#   scale_color_berg(palette="stin")+
+#   theme_fivethirtyeight()
+
+pickers_noNA <- pickers %>% 
+  drop_na()
+
+games_picked <- pickers %>% 
+  select(week,picker,team_pick) %>% 
+  filter(team_pick != "") %>% 
+  count(week,picker)
+
+as_tibble(aggregate(select_if(pickers_noNA, is.numeric),
+                    by = list(week = pickers_noNA$week, picker = pickers_noNA$picker),
+                    FUN = sum)) %>% 
+  mutate(cumupoints = ave(points, picker, FUN = cumsum),
+         cumunits = ave(units, picker, FUN = cumsum),
+         cumuacc = ave(correct, picker, FUN = cumsum)) %>% 
+  select(week, picker, cumupoints, cumunits, cumuacc) %>% 
+  left_join(games_picked) %>% 
+  mutate(games_picked = ave(n, picker, FUN = cumsum),
+         cumuscore = 0.75 * cumuacc/games_picked + 0.25 * cumunits/games_picked) %>% 
+  ggplot(aes(x=week,y=cumuscore, group = picker, color = picker, shape = picker))+
+  geom_line(size = 2, alpha = 0.7)+
+  geom_point(size=4)+
+  scale_color_berg(palette="stin")+
+  theme_fivethirtyeight()+
+  ggtitle('2019-2020 NFL Season')+
+  xlab('Week')
+```
+
+```{r team data plot}
+team_data %>% 
+  mutate(team = fct_reorder(team, diff)) %>%
+  arrange(diff) %>% 
+  ggplot(aes(x=team,y=diff,fill=positive))+
+  geom_bar(stat="identity", position='dodge', alpha = 0.7)+
+  scale_fill_manual(values = c("red","navy"), guide = FALSE, drop = FALSE) +
+  coord_flip()+
+  ylab("Wins minus average times picked by us")+
+  xlab("")+
+  annotate(geom='label', x=5, y=2, label='These teams lost more\nthan we picked them', color = 'red', fontface = 'bold', size = 5)+
+  annotate(geom='label',x=28, y=-2, label='These teams won more\nthan we picked them', color = 'navy', fontface = 'bold', size = 5)+
+  scale_x_discrete(drop=FALSE)+
+  classic_theme
+```
+
+```{r pick data plot}
+ggplot(pick_data, aes(x=team,y=diff,fill=positive, picker))+
+  geom_bar(stat="identity",position='dodge', alpha = 0.7)+
+  scale_fill_manual(values = c("red","turquoise"), guide = FALSE) +
+  coord_flip()+
+  ylab("Wins - times picked")+
+  facet_wrap(~picker)
+
+pick_data %>% 
+  arrange(desc(diff)) %>% 
+  head(30) %>% 
+  ggplot()+
+  geom_bar(aes(x=team,y=diff,fill=picker),stat="identity",position='dodge', alpha = 0.7)+
+  coord_flip()+
+  ylab("Wins - times picked")+
+  facet_wrap(~picker)
+
+pick_data %>% 
+  arrange((diff)) %>% 
+  head(30) %>% 
+  ggplot()+
+  geom_bar(aes(x=team,y=diff,fill=picker),stat="identity",position='dodge', alpha = 0.7)+
+  coord_flip()+
+  ylab("Wins - times picked")+
+  facet_wrap(~picker)
+```
+
+```{r pick data plot chart party 3}
+pick_data %>% 
+  arrange((diff)) %>% 
+  mutate(alpha_val = abs(diff)/10) %>% 
+  ggplot()+
+  geom_tile(aes(x = picker, y = team, fill = diff, alpha = alpha_val))+
+  theme_fivethirtyeight()+
+  scale_fill_gradient2(low = "orangered", high = "navy", mid = "transparent", limits = c(-11,10),
+                       'Wins minus times picked')+
+  ggtitle('Picking biases',
+          subtitle = 'The difference between times you picked a team and the times they won')+
+  guides(alpha=FALSE)+
+  labs(caption='Data from the 2019-2020 season. Red indicates you picked them too often, blue indicates you did not pick them enough.')
+
+```
+
+```{r pick data plot chart party 3.1}
+pick_data %>% 
+  arrange((diff)) %>% 
+  mutate(alpha_val = abs(diff)/10) %>% 
+  ggplot()+
+  geom_tile(aes(x = picker, y = team, fill = diff, alpha = alpha_val))+
+  theme_fivethirtyeight()+
+  scale_fill_gradient2(low = "orangered", high = "navy", mid = "white", limits = c(-11,10),
+                       'Wins minus times picked')+
+  ggtitle('Picking biases',
+          subtitle = 'The difference between times you picked a team and the times they won')+
+  guides(alpha=FALSE)+
+  labs(caption='Data from the 2019-2020 season. Red indicates you picked them too often, blue indicates you did not pick them enough.')
+```
+
+```{r animated picks over time}
+
+teams <- pickers %>% 
+  distinct(team_pick) %>% 
+  unique() %>% 
+  filter(team_pick != "") 
+
+long_list <- as_tibble(rep(teams$team_pick, each = 1, times = 17*6)) %>% 
+  rename(team_pick = value) %>% 
+  mutate(week_num = rep(1:17, each=32, times = 6),
+         picker = rep(unique(pickers$picker), times = 1, each = 32*17))
+
+team_colors <- team_info %>% 
+  select(team_name, team_color) %>% 
+  rename(team_pick = team_name)
+
+pick_data_weekly <- pickers %>% 
+  select(picker, week, team_pick) %>% 
+  distinct(picker, week, team_pick) %>% 
+  group_by(picker, team_pick) %>% 
+  mutate(count = row_number()) %>% 
+  mutate(week_num = as.numeric(trimws(week, which = "left", whitespace = "0"))) %>% 
+  right_join(long_list,
+             by = c("picker", "team_pick", "week_num")) %>% 
+  mutate(count = ifelse(is.na(count),0,1),
+         week = str_pad(week_num, 2, pad = "0")) %>% 
+  arrange(picker, week_num) %>% 
+  summarise(count = cumsum(count)) %>% 
+  ungroup() %>% 
+  mutate(week_num = rep(1:17, each=1, times = 6*32)) %>% 
+  left_join(team_colors) %>%  
+  mutate(alpha_val = count/week_num)
+
+pick_data_weekly  %>% 
+  ggplot()+
+  geom_tile(aes(x = picker, y = team_pick, fill = team_color, alpha = alpha_val))+
+  theme_fivethirtyeight()+
+  scale_fill_identity()+
+  scale_alpha_identity()+
+  ggtitle('Who Picked Who?',
+          subtitle = 'Number of times we picked specific teams')+
+  guides(alpha=FALSE)+
+  labs(caption='Data from the 2019-2020 season. Sorry Jets.')
+
+library(gganimate)
+# 
+# pick_data_weekly %>% 
+#   ggplot()+
+#   geom_tile(aes(x = picker, y = team_pick, fill = team_color, alpha = alpha_val))+
+#   theme_fivethirtyeight()+
+#   scale_fill_identity()+
+#   scale_alpha_identity()+
+#   # scale_fill_gradient2(low = "white", high = "darkblue", 'Times Picked',
+#   #                      limits = c(0,16))+
+#   ggtitle("Who Picked Who? Week { current_frame }",
+#           subtitle = 'Number of times we picked specific teams')+
+#   labs(caption= "2019-20 NFL Season")+
+#   transition_manual(week_num)
+
+# anim_save("~/Desktop/picks_over_time_colorful.gif")
+
+# pick_data_weekly %>% 
+#   ggplot()+
+#   geom_tile(aes(x = picker, y = team_pick, fill = count, alpha = alpha_val))+
+#   theme_fivethirtyeight()+
+#   scale_fill_gradient2(low = "white", high = "darkblue", 'Times Picked')+
+#   ggtitle("Who Picked Who? Week { current_frame }",
+#           subtitle = 'Number of times we picked specific teams')+
+#   labs(caption= "2019-20 NFL Season")+
+#   transition_manual(week_num)
+
+# post_office_years %>% 
+#   drop_na() %>% 
+#   filter(year %% 4 == 0,
+#          !state %in% c("HI", "AK")) %>% 
+#   ggplot(aes(longitude,latitude))+
+#   borders("state")+
+#   geom_point(size=0.01, alpha = 0.25, color = 'navy')+
+#   theme_map()+
+#   transition_manual(year)+
+#   labs(title = "{ current_frame }")+
+#   coord_map()
+
+# anim_save("~/Desktop/picks_over_time_blue.gif")
+```
+
+```{r tile}
+pickers %>% 
+  select(team_pick, picker) %>% 
+  count(team_pick, picker) %>% 
+  ggplot()+
+  geom_tile(aes(x = picker, y = team_pick, fill = n))+
+  scale_fill_gradient(low = "white", high = "darkgreen")+
+  theme_fivethirtyeight()
+
+pickers %>% 
+  select(team_pick, picker) %>% 
+  count(team_pick, picker) %>% 
+  ggplot()+
+  geom_tile(aes(x = picker, y = team_pick, fill = n))+
+  scale_fill_gradient(low = "white", high = "darkgreen")
+
+pickers %>% 
+  select(pick_conf, picker) %>% 
+  filter(!is.na(pick_conf)) %>% 
+  count(pick_conf, picker) %>% 
+  ggplot()+
+  geom_tile(aes(x = picker, y = pick_conf, fill = n))+
+  scale_fill_gradient(low = "white", high = "darkgreen", limits = c(20,60))+
+  ylab('Pick Conference')+
+  xlab('')
+```
+
+```{r third quarter plot}
+pickers_third <- pickers %>% 
+  left_join(thirdqtr,
+            by=c("game_id", "picker")) %>% 
+  rename(game_winner = winner.x,
+         thirdqtr_winner = winner.y) %>% 
+  mutate(blew_it = ifelse(game_winner==thirdqtr_winner,NA,thirdqtr_winner)) %>% 
+  mutate(oof = ifelse(blew_it==team_pick.y,1,0))
+
+pickers_third %>% 
+  count(blew_it) %>% 
+  mutate(n = n/6) %>% 
+  arrange(desc(n))
+
+pickers_third %>% 
+  drop_na() %>% 
+  group_by(picker) %>% 
+  mutate(total_points = cumsum(points.y)) %>% 
+  ggplot()+
+  geom_line(aes(x=date.x,y=total_points,color=picker))+
+  scale_color_berg(palette="stin")
+
+pickers_third %>% 
+  filter(oof==1) %>% 
+  count(oof, picker) %>% 
+  arrange(desc(n)) %>% 
+  ggplot()+
+  geom_col(aes(x=picker,y=n,fill=picker), alpha = 0.9)+
+  scale_fill_berg(palette="stin")+
+  theme_fivethirtyeight() +
+  ggtitle('# of times the team you picked \nblew it in the fourth quarter')+
+  xlab('')
+
+pickers_third %>% 
+  drop_na() %>% 
+  group_by(picker) %>% 
+  mutate(total_points = cumsum(correct.y)) %>% 
+  ggplot()+
+  geom_line(aes(x=date.x,y=total_points,color=picker))+
+  scale_color_berg(palette="stin")
+```
+
+```{r second quarter plot}
+pickers_second <- pickers %>% 
+  left_join(secondqtr,
+            by=c("game_id", "picker")) %>% 
+  rename(game_winner = winner.x,
+         secondqtr_winner = winner.y) %>% 
+  mutate(blew_it = ifelse(game_winner==secondqtr_winner,NA,secondqtr_winner)) %>% 
+  mutate(oof = ifelse(blew_it==team_pick.y,1,0))
+
+pickers_second %>% 
+  count(blew_it) %>% 
+  mutate(n = n/6) %>% 
+  arrange(desc(n))
+
+pickers_second %>% 
+  drop_na() %>% 
+  group_by(picker) %>% 
+  mutate(total_points = cumsum(points.y)) %>% 
+  ggplot()+
+  geom_line(aes(x=date.x,y=total_points,color=picker))+
+  scale_color_berg(palette="stin")
+
+pickers_second %>% 
+  filter(oof==1) %>% 
+  count(oof, picker) %>% 
+  arrange(desc(n)) %>% 
+  ggplot()+
+  geom_col(aes(x=picker,y=n,fill=picker), alpha = 0.9)+
+  scale_fill_berg(palette="stin")+
+  theme_fivethirtyeight() +
+  ggtitle('# of times the team you picked \nblew it in the second half')+
+  xlab('')
+
+pickers_second %>% 
+  drop_na() %>% 
+  group_by(picker) %>% 
+  mutate(total_points = cumsum(correct.y)) %>% 
+  ggplot()+
+  geom_line(aes(x=date.x,y=total_points,color=picker))+
+  scale_color_berg(palette="stin")
+```
+
+```{r picker pick distribution}
+
+pickers %>% mutate(pick_ha = case_when(team_pick==h_team ~ "Home",
+                                       team_pick==a_team ~ "Away"),
+                   pick_under = ifelse(pick_odds>0, "Underdog", "Favorite"),
+                   pick_type = as_factor(case_when(pick_ha=="Home" & pick_under== "Favorite" ~ "Home Favorite",
+                                         pick_ha=="Away" & pick_under== "Favorite" ~ "Away Favorite",
+                                         pick_ha=="Home" & pick_under== "Underdog" ~ "Home Underdog",
+                                         pick_ha=="Away" & pick_under== "Underdog" ~ "Away Underdog"))) %>% 
+  drop_na() %>% 
+  select(week, picker, pick_type) %>% 
+  count(pick_type, picker) %>% 
+  group_by(picker) %>% 
+  mutate(label_y = n/sum(n)) %>% 
+  ggplot(mapping = aes(x = picker, y = n, fill = fct_reorder2(pick_type, n, picker)))+
+  geom_col(position ="fill", alpha = 0.95)+
+  scale_fill_berg(palette = "hot")+
+  theme_fivethirtyeight()+
+  ggtitle("Do Picking Strategies Exist?",
+          subtitle = 'Distribution of pick types for each picker')+
+  labs(caption= "2020-21 NFL Season")+
+  labs(fill = "Pick Type")+
+  geom_text(aes(y = label_y, 
+                label = paste(format((100*n/256), digits = 1), "%")), 
+            position = position_stack(vjust = 0.5), 
+            size = 3,
+            color = "white")+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))
+```
+
+

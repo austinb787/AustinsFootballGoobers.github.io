@@ -39,10 +39,6 @@ w2 <- read_sheet(week2long)
   <p> Austins Football Goobers | Austin Berg | github.com/austinb787/Austins-Football-Goobers </p>
 </div>
 
-```{r export}
-
-
-```
 
 1. Dashboard
 =====================================

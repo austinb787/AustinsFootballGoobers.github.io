@@ -1,0 +1,76 @@
+---
+title: "NFL 2021 Schedule"
+author: "Austin Berg"
+date: "5/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+
+nfl_grid <- read_excel("2021_NFL_Schedule_Grid.xlsx")
+```
+
+```{r}
+library(tidyverse)
+schedule <- nfl_grid %>% 
+  pivot_longer(cols = 2:19,
+               names_to = "week",
+               values_to = "opponent")
+```
+
+
+```{r}
+library(stringr)
+
+schedule$week <- as.integer(str_replace(string = schedule$week, pattern = "Wk ", replacement = ""))
+
+schedule <- schedule %>% 
+  mutate(location = ifelse(str_detect(opponent, "at ") == TRUE, 'Away', 'Home'))
+
+schedule$at <- str_split_fixed(schedule$opponent, pattern = " ", n = 2)
+
+schedule <- schedule %>% 
+  mutate(at = ifelse(at == "at", "at", ""),
+         opponent = str_replace(opponent, "at ", "")) %>% 
+  relocate(week) %>% 
+  relocate(at, .after = Team) %>% 
+  rename(team_abbr = Team) %>% 
+  mutate(at = at[,1])
+```
+
+
+```{r}
+library(nflfastR)
+library(ggimage)
+library(ggthemes)
+
+teamlist <- c("CAR", "GB", "MIN", "SEA", "SF")
+team_colors_logos <- nflfastR::teams_colors_logos %>% 
+  filter(team_abbr %in% teamlist)
+
+
+inner_join(schedule,
+           team_colors_logos) %>% 
+  filter(opponent %in% teamlist) %>% 
+  ggplot(mapping = aes(x = week, y = opponent))+
+  geom_tile(alpha = 0)+
+  geom_image(aes(image = team_logo_espn), size = 0.05, asp = 16 / 9)+
+  theme_fivethirtyeight()+
+  ggtitle('Big Games in the Berg Household',
+          subtitle = 'For the 2021 NFL Season')+
+  # guides(alpha=FALSE)+
+  labs(caption='Data for the 2021-2022 season')+
+  # xlim(0, 18)+
+  geom_text(mapping = aes(label = location), vjust = 4)+
+  scale_x_discrete(name = "Week",
+                   limits = seq(0,18))+
+  theme(axis.text = element_text(size=14,face="bold"))
+
+```
+
+
